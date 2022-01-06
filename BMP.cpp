@@ -3,7 +3,6 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
-#include <sstream>
 
 BMP::BMP()
 {
@@ -29,36 +28,39 @@ BMP::~BMP()
 
 void BMP::open(std::string fileName)
 {
-    if (!initialised)
+    if (!(fileName.substr(fileName.length() - 4) == ".bmp" || fileName.substr(fileName.length() - 4) == ".BMP"))
     {
-        if (!(fileName.substr(fileName.length() - 4) == ".bmp" || fileName.substr(fileName.length() - 4) == ".BMP"))
-        {
-            fileName += ".bmp";
-        }
-        init(fileName);
-        initialised = true;
+        fileName += ".bmp";
     }
+    init(fileName);
+    initialised = true;
 }
 
 void BMP::close()
 {
     initialised = false;
-    bitDepth = 24;
     for (int i = 0; i < width; i++)
     {
         delete[] R[i];
         delete[] G[i];
         delete[] B[i];
-        delete[] A[i];
+    }
+    if (bitDepth == 32)
+    {
+        for (int i = 0; i < width; i++)
+        {
+            delete[] A[i];
+        }
+        delete[] A;
     }
     delete[] R;
     delete[] G;
     delete[] B;
-    delete[] A;
     R = nullptr;
     G = nullptr;
     B = nullptr;
     A = nullptr;
+    bitDepth = 24;
     width = 0;
     height = 0;
 }
@@ -73,7 +75,7 @@ void BMP::exportBMP(std::string fileName)
     int fileSize;
     int rawPixelSize = (width * height * bitDepth / 8);
     int padding = (4 - ((width * (bitDepth / 8)) % 4)) % 4;
-    if (!(fileName.substr(fileName.length() - 4) == ".bmp" || fileName.substr(fileName.length() - 4) == ".BMP"))
+    if (fileName.length() < 5 || (!(fileName.substr(fileName.length() - 4) == ".bmp" || fileName.substr(fileName.length() - 4) == ".BMP")))
     {
         fileName += ".bmp";
     }
@@ -83,31 +85,45 @@ void BMP::exportBMP(std::string fileName)
             fileSize = 54 + rawPixelSize + height * padding;
             break;
         case 32:
-            fileSize = 74 + rawPixelSize;
+            fileSize = 138 + rawPixelSize;
             break;
         default:
             close();
             return;
     }
-    std::ofstream out(fileName);
-    out << "BM" << write(fileSize) << encode(fourBytes);
+    outputString.reserve(fileSize);
+    outputString = "BM";
+    write(fileSize);
+    encode(0);
     switch (bitDepth)
     {
         case 24:
-            out << write(54) << write(40) << write(width) << write(height) << write(1, 2) << write(bitDepth, 2);
-            for (int i = 0; i < 6; i++)
-            {
-                out << encode(fourBytes);
-            }
+            write(54);
+            write(40);
+            write(width);
+            write(height);
+            write(1, 2);
+            write(bitDepth, 2);
+            encode(0, 24);
             break;
         case 32:
-            out << write(138) << write(124) << write(width) << write(height) << write(1, 2) << write(bitDepth, 2) << write(3)
-                << write(rawPixelSize) << encode("130B0000") << encode("130B0000") << encode(fourBytes) << encode(fourBytes)
-                << encode("000000FF") << encode("0000FF00") << encode("00FF0000") << encode("FF000000") << "BGRs";
-            for (int i = 0; i < 16; i++)
-            {
-                out << encode(fourBytes);
-            }
+            write(138);
+            write(124);
+            write(width);
+            write(height);
+            write(1, 2);
+            write(bitDepth, 2);
+            write(3);
+            write(rawPixelSize);
+            encode(0x130B0000);
+            encode(0x130B0000);
+            encode(0, 8);
+            encode(0x000000FF);
+            encode(0x0000FF00);
+            encode(0x00FF0000);
+            encode(0xFF000000);
+            outputString += "BGRs";
+            encode(0, 64);
             break;
     }
     for (int y = height - 1; y >= 0; y--)
@@ -116,22 +132,26 @@ void BMP::exportBMP(std::string fileName)
         {
             if (bitDepth == 32)
             {
-                out << write(A[x][y], 1);
+                write(A[x][y], 1);
             }
-            out << write(B[x][y], 1) << write(G[x][y], 1) << write(R[x][y], 1);
+            write(B[x][y], 1);
+            write(G[x][y], 1);
+            write(R[x][y], 1);
         }
         for (int i = 0; i < padding; i++)
         {
-            out << encode("00");
+            encode(0, 1);
         }
     }
-    out.close();
+    std::ofstream outFile(fileName, std::ios::binary);
+    outFile << outputString;
+    outFile.close();
+    outputString.resize(0);
 }
 
 void BMP::init(const std::string &fileName)
 {
-    std::ifstream ifs;
-    ifs.open(fileName);
+    std::ifstream ifs(fileName, std::ios::binary);
     std::vector<unsigned char> header(0x46, 0);
     char temp;
     for (int i = 0; i < 0x1E; i++)
@@ -271,12 +291,22 @@ void BMP::setBitDepth(int value)
                     std::fill(&A[i][0], &A[i][height], 255);
                 }
             }
+            break;
         case 24:
-            bitDepth = value;
+            if (A != nullptr)
+            {
+                for (int i = 0; i < width; i++)
+                {
+                    delete[] A[i];
+                }
+                delete[] A;
+            }
+            A = nullptr;
             break;
         default:
-            throw std::invalid_argument("Invalid bit depth");
+            throw std::invalid_argument("Unsupported bit depth");
     }
+    bitDepth = value;
 }
 
 void BMP::setColour(int x, int y, int value)
@@ -362,7 +392,7 @@ int BMP::getColour(int x, int y, RGBA colour) const
     }
 }
 
-int BMP::makeBigEndian(std::vector<unsigned char> num)
+int BMP::makeBigEndian(const std::vector<unsigned char> &num)
 {
     int length = (int) num.size();
     int *reversed = new int[length];
@@ -381,70 +411,31 @@ int BMP::makeBigEndian(std::vector<unsigned char> num)
     return sum;
 }
 
-int BMP::makeBigEndian(std::vector<unsigned char> num, int start, int end)
+int BMP::makeBigEndian(const std::vector<unsigned char> &num, int start, int end)
 {
     std::vector<unsigned char> sub(&num[start], &num[end]);
     return makeBigEndian(sub);
 }
 
-std::string BMP::makeLittleEndian(int num, int bytes)
+unsigned int BMP::swapEndianness(unsigned int num)
 {
-    std::string result;
-    if (bytes > 4)
+    return (num >> 24) | ((num << 8) & 0x00FF0000) | ((num >> 8) & 0x0000FF00) | (num << 24);
+}
+
+void BMP::encode(unsigned int num, int bytes)
+{
+    unsigned int oneByte;
+    for (int i = 0; i < bytes; i++)
     {
-        throw std::invalid_argument("This method does not support long int data type (max bytes = 4)");
-    } else if (bytes < 0)
-    {
-        throw std::invalid_argument("Number of assigned bytes cannot be negative");
+        oneByte = num & 0xFF000000;
+        outputString.push_back((char) (oneByte >> 24));
+        num = num << 8;
     }
-    num = (num >> 24) | ((num << 8) & 0x00FF0000) | ((num >> 8) & 0x0000FF00) | (num << 24);
-    std::stringstream stream;
-    stream << std::hex << num;
-    result = stream.str();
-    while (result.length() < 8)
-    {
-        result.insert(0, "0");
-    }
-    return result.substr(0, bytes * 2);
 }
 
-std::string BMP::makeLittleEndian(int num)
+void BMP::write(int num, int bytes)
 {
-    return makeLittleEndian(num, 4);
-}
-
-std::string BMP::extend(std::string &hexValue, int bytes)
-{
-    while (hexValue.length() < bytes * 2)
-    {
-        hexValue.append("0");
-    }
-    return hexValue;
-}
-
-std::string BMP::encode(const std::string &hexValue)
-{
-    std::stringstream stream;
-    std::string str;
-    int temp;
-    for (int i = 0; i < hexValue.length(); i += 2)
-    {
-        stream << std::hex << hexValue.substr(i, 2);
-        stream >> temp;
-        stream.clear();
-        str += (char) temp;
-    }
-    return str;
-}
-
-std::string BMP::write(int num, int bytes)
-{
-    return encode(makeLittleEndian(num, bytes));
-}
-
-std::string BMP::write(int num)
-{
-    return write(num, 4);
+    encode(swapEndianness(num), bytes);
 }
 
 int *BMP::digestColourTable(const std::vector<unsigned char> &colourTable)

@@ -15,19 +15,17 @@ class BMP
     unsigned char **B;
     unsigned char **A;
 
-    const std::string fourBytes = "00000000";
+    std::string outputString;
 
     void init(const std::string& fileName);
 
-    static int makeBigEndian(std::vector<unsigned char>);
-    static int makeBigEndian(std::vector<unsigned char> num, int start, int end);
-    static std::string makeLittleEndian(int num, int bytes);
-    static std::string makeLittleEndian(int num);
+    void write(int num, int bytes = 4);
 
-    static std::string extend(std::string& hexValue, int bytes);
-    static std::string encode(const std::string& hexValue);
-    static std::string write(int num);
-    static std::string write(int num, int bytes);
+    static int makeBigEndian(const std::vector<unsigned char> &num);
+    static int makeBigEndian(const std::vector<unsigned char> &num, int start, int end);
+    static unsigned int swapEndianness(unsigned int num);
+
+    void encode(unsigned int num, int bytes = 4);
     static int* digestColourTable(const std::vector<unsigned char>& colourTable);
 public:
     BMP();
